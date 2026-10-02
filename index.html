@@ -544,6 +544,7 @@ function genSem(lv, rng, opt = {}) {
       if (f1.B.a * f2.B.b - f2.B.a * f1.B.b === 0) continue;
       sem = prod([f1, f2], sg(rng), strict);
     }
+    if (opt.checks && !opt.checks.every(c => likeOK(sem, c.like, c.types))) continue;
     if (validSem(sem, limit)) return sem;
   }
   throw new Error('問題を作れませんでした: LV' + lv);
@@ -666,6 +667,78 @@ function judge(p, selectedKeys, strict) {
   return sel.size === p.answerKeys.length && p.answerKeys.every(k => sel.has(k)) && strict === p.sem.strict;
 }
 
+// ---------- 間違い方を見分ける ----------
+// 正解の式の「判断」をいくつか反対にした式を作り、プレイヤーの答えがどれに当たるかで見分ける。
+//   line … じっせん／てんせん　dir … ぬる がわが はんたい　flip … LV2 で マイナスで わった むきの かえわすれ
+//   side0, side1 … LV4 で 片方の式だけ はんたい　parity … LV5 で 市松が はんたい　scatter … どれにも 当たらない
+function variants(sem) {
+  if (sem.mode === 'prod') return [{ flips: [], sem }, { flips: ['P'], sem: flipS(sem, 0) }];
+  const out = [];
+  for (let m = 0; m < (1 << sem.atoms.length); m++) {
+    let v = sem;
+    const flips = [];
+    for (let i = 0; i < sem.atoms.length; i++) if ((m >> i) & 1) { v = flipS(v, i); flips.push(i); }
+    out.push({ flips, sem: v });
+  }
+  return out;
+}
+function flipTypes(p, flips) {
+  if (!flips.length) return [];
+  if (flips[0] === 'P') return ['parity'];
+  if (p.sem.atoms.length === 1) return [p.lv === 2 && p.sem.atoms[0].B.b < 0 ? 'flip' : 'dir'];
+  return flips.length === 2 ? ['dir'] : ['side' + flips[0]];
+}
+// ans: 順方向は { keys, strict }、逆向きは { opt }
+function classify(p, ans) {
+  let flips, strict;
+  if (p.kind === 'rev') {
+    const o = p.options[ans.opt].sem;
+    strict = o.strict;
+    flips = o.mode === 'prod' ? (o.s !== p.sem.s ? ['P'] : [])
+                              : o.atoms.map((a, i) => (a.s !== p.sem.atoms[i].s ? i : -1)).filter(i => i >= 0);
+  } else {
+    strict = ans.strict;
+    const sel = new Set(ans.keys);
+    const v = variants(p.sem).find(v => {
+      const ak = p.keys.filter(k => regionSat(v.sem, k));
+      return ak.length === sel.size && ak.every(k => sel.has(k));
+    });
+    if (!v) return { types: ['scatter'].concat(strict !== p.sem.strict ? ['line'] : []) };
+    flips = v.flips;
+  }
+  const types = flipTypes(p, flips);
+  if (strict !== p.sem.strict) types.push('line');
+  return { types };
+}
+const TYPE_TEXT = {
+  line: 'せん（じっせん／てんせん）が ちがう',
+  dir: 'ぬる がわが はんたい',
+  flip: 'マイナスで わったのに むきを かえていない',
+  parity: 'かけた ふごうの がわが はんたい',
+  scatter: 'ぬる ところの えらびかたが ばらばら',
+};
+const MASTER_TEXT = { line: 'せんの えらびかた', dir: 'ぬる がわ', flip: 'マイナスで わる ときの むき', parity: 'かけざんの ふごう', side: 'れんりつの かたほう' };
+function describe(p, cls) {
+  return cls.types.map(t => (t.startsWith('side') ? '「' + atomStr(p.sem.atoms[+t[4]], p.sem.strict) + '」の がわが はんたい' : TYPE_TEXT[t])).join('、');
+}
+function masterText(t) { return MASTER_TEXT[t.startsWith('side') ? 'side' : t]; }
+
+// 苦手の問題：間違えた問題と「同じ判断」で正誤が分かれるもの
+function formCat(a) { return a.form === 'y' && a.m === 0 ? 'yh' : a.form; }
+function likeOK(sem, like, types) {
+  for (const t of types) {
+    if (t === 'line') { if (sem.strict !== like.strict) return false; continue; }
+    if (sem.mode !== like.mode || sem.atoms.length !== like.atoms.length) return false;
+    if (t === 'parity') { if (sem.s !== like.s) return false; continue; }
+    // dir・flip・side：式の形をそろえ、間違えた式と同じ向きにする
+    if (!sem.atoms.every((a, i) => formCat(a) === formCat(like.atoms[i]))) return false;
+    const idx = t.startsWith('side') ? [+t[4]] : sem.atoms.map((_, i) => i);
+    if (!idx.every(i => sem.atoms[i].s === like.atoms[i].s)) return false;
+    if (t === 'flip' && sem.atoms[0].B.b >= 0) return false;
+  }
+  return true;
+}
+
 // ---------- ステージ ----------
 const LEVELS = [
   { lv: 1, name: 'ハミダシ', sprite: '👻' },
@@ -678,24 +751,35 @@ const LEVELS = [
 // 1戦ごとの「どのLVの・どちら向きの問題か」。LV1〜5は2戦のうち1戦、BOSSは4戦のうち2戦が逆向き。
 const BATTLES = 2;     // LV1〜5 の戦う数
 const BOSS_HP = 4;     // BOSS の戦う数
-function makeSlots(level, rng) {
+function makeSlots(level, rng, ctx) {
   if (!level.boss) {
     const rev = ri(rng, 0, BATTLES - 1);
     return [...Array(BATTLES).keys()].map(i => ({ lv: level.lv, kind: i === rev ? 'rev' : 'fwd' }));
   }
   // LV1〜5 から BOSS_HP 個を選んで、まぜて出す
-  const lvs = shuffle(rng, [1, 2, 3, 4, 5]).slice(0, BOSS_HP);
+  // 苦手が残っている LV を先に入れる
+  const weak = ctx ? Object.keys(ctx.weak).map(Number) : [];
+  const lvs = shuffle(rng, shuffle(rng, weak).concat(shuffle(rng, [1, 2, 3, 4, 5].filter(v => !weak.includes(v)))).slice(0, BOSS_HP));
   const revIdx = shuffle(rng, [...Array(BOSS_HP).keys()]).slice(0, 2);
   return lvs.map((lv, i) => ({ lv, kind: revIdx.includes(i) ? 'rev' : 'fwd' }));
 }
-function newContext() { return { lv2Count: 0, recent: [] }; }
+// weak[lv] … その LV の苦手（2回続けて正解で こくふく）。line … じっせん／てんせん の苦手（LV をまたぐ）
+function newContext() { return { lv2Count: 0, recent: [], weak: {}, line: null, log: [] }; }
 // LV2 は y の係数がマイナスの問題を3問に2問（逆向きはいつもマイナス）
 function makeProblem(slot, ctx, rng) {
+  const w = ctx.weak[slot.lv];
+  const checks = [];
+  if (w) checks.push({ like: w.like, types: w.types });
+  if (ctx.line) checks.push({ like: ctx.line.like, types: ['line'] });
   let p, tries = 0;
   do {
-    const opt = {};
-    if (slot.lv === 2) opt.negB = slot.kind === 'rev' || ctx.lv2Count % 3 !== 2;
-    p = build(slot.lv, genSem(slot.lv, rng, opt), slot.kind, rng);
+    const opt = { checks };
+    if (slot.lv === 2) opt.negB = w ? w.like.atoms[0].B.b < 0 : (slot.kind === 'rev' || ctx.lv2Count % 3 !== 2);
+    let sem;
+    try { sem = genSem(slot.lv, rng, opt); }
+    catch (e) { opt.checks = []; sem = genSem(slot.lv, rng, opt); } // 条件に合う問題が作れないときは、ふつうの問題
+    p = build(slot.lv, sem, slot.kind, rng);
+    p.target = { lv: !!w && opt.checks.length > 0, line: !!ctx.line && opt.checks.length > 0 };
   } while (ctx.recent.includes(p.display) && ++tries < 20);
   if (slot.lv === 2) ctx.lv2Count++;
   ctx.recent.push(p.display);
@@ -703,10 +787,30 @@ function makeProblem(slot, ctx, rng) {
   return p;
 }
 
+// 答えの結果を記録して、苦手を更新する。返り値の mastered は こくふく した苦手
+function record(ctx, p, ok, cls, ms) {
+  const ev = { lv: p.lv, kind: p.kind, display: p.display, ok, types: cls ? cls.types : [], target: p.target, ms, mastered: [] };
+  const w = ctx.weak[p.lv];
+  if (ok) {
+    if (p.target.lv && w && ++w.got >= 2) { ev.mastered.push(...w.types); delete ctx.weak[p.lv]; }
+    if (p.target.line && ctx.line && ++ctx.line.got >= 2) { ev.mastered.push('line'); ctx.line = null; }
+  } else {
+    const main = cls.types.filter(t => t !== 'line' && t !== 'scatter');
+    if (main.length) {
+      const same = !!w && main.every(t => w.types.includes(t));
+      ctx.weak[p.lv] = { types: main, like: p.sem, got: 0, misses: same ? w.misses + 1 : 1 };
+    } else if (w && p.target.lv) w.got = 0;
+    if (cls.types.includes('line')) ctx.line = { like: { strict: p.sem.strict }, got: 0, misses: ctx.line ? ctx.line.misses + 1 : 1 };
+  }
+  ctx.log.push(ev);
+  return ev;
+}
+
 G.RyouikiCore = {
   R, MIN_AREA, atom, and, prod, line, circle, fval, display, satisfies, keyAt, idxAt, allKeys, keyMask,
   regionSat, areas, centroids, validSem, genSem, build, judge, makeOptions, LEVELS, makeSlots,
   newContext, makeProblem, mulberry32, numStr, BATTLES, BOSS_HP,
+  classify, describe, masterText, likeOK, record, variants,
 };
 })(typeof window !== 'undefined' ? window : this);
 </script>
@@ -969,6 +1073,7 @@ function newProblem() {
   state.reveal = false;
   state.labels = false;
   state.phase = 'play';
+  state.shownAt = performance.now();
   renderProblem();
   renderControls();
   renderStatus();
@@ -977,7 +1082,7 @@ function newProblem() {
 function startLevel(idx) {
   state.levelIdx = idx;
   const lv = level();
-  state.slots = C.makeSlots(lv, rng);
+  state.slots = C.makeSlots(lv, rng, state.ctx);
   state.slotIdx = 0;
   state.hp = lv.boss ? C.BOSS_HP : 1;
   state.lives = MAX_LIVES;
@@ -990,19 +1095,23 @@ function startLevel(idx) {
 function submit() {
   const p = state.problem;
   if (state.phase !== 'play' || !p) return;
-  let ok;
+  let ok, ans;
   if (p.kind === 'fwd') {
     if (state.selected.size === 0) { setMessage('ぬる ところを タップしてね'); return; }
     if (!state.line) { setMessage('じっせん か てんせん を えらんでね'); return; }
-    ok = C.judge(p, state.selected, state.line === 'dashed');
+    ans = { keys: [...state.selected], strict: state.line === 'dashed' };
+    ok = C.judge(p, ans.keys, ans.strict);
   } else {
     if (state.opt < 0) { setMessage('しきを ひとつ えらんでね'); return; }
+    ans = { opt: state.opt };
     ok = p.options[state.opt].correct;
   }
-  if (ok) onCorrect(); else onWrong();
+  const cls = ok ? null : C.classify(p, ans);
+  const ev = C.record(state.ctx, p, ok, cls, Math.round(performance.now() - state.shownAt));
+  if (ok) onCorrect(ev); else onWrong(cls);
 }
 
-function onCorrect() {
+function onCorrect(ev) {
   const lv = level();
   state.phase = 'busy';
   state.reveal = true;
@@ -1013,7 +1122,8 @@ function onCorrect() {
   flashScreen();
   monsterAnim('hit');
   showDamage('-1', '#ffff00');
-  setMessage('せいかい！　' + lv.name + 'に　ダメージ！');
+  const mastered = ev.mastered.map(t => '◎ ' + C.masterText(t) + ' こくふく！').join('\n');
+  setMessage('せいかい！　' + lv.name + 'に　ダメージ！' + (mastered ? '\n' + mastered : ''));
   // 正しい図を1秒見せる
   setTimeout(() => {
     state.slotIdx += 1;
@@ -1049,7 +1159,7 @@ function afterDefeat() {
   setMessage('また ' + lv.name + 'が　あらわれた！\n' + hint());
 }
 
-function onWrong() {
+function onWrong(cls) {
   const p = state.problem;
   state.lives -= 1;
   state.phase = 'next';
@@ -1060,10 +1170,14 @@ function onWrong() {
   renderStatus();
   monsterAnim('miss-dmg');
   showDamage('MISS', '#ff4444');
-  setMessage(['ざんねん！　ただしい ずは こう（きいろ）', ...p.reason].join('\n'));
+  setMessage(['ざんねん！　' + C.describe(p, cls), 'ただしい ずは こう（きいろ）', ...p.reason].join('\n'));
   state.onNext = state.lives <= 0
     ? () => { state.phase = 'idle'; $('gameOverScreen').classList.remove('hidden'); }
-    : () => { newProblem(); setMessage('もういちど！\n' + hint()); };
+    : () => {
+        newProblem();
+        const t = state.problem.target;
+        setMessage((t.lv || t.line ? 'にた もんだいで たしかめよう！' : 'もういちど！') + '\n' + hint());
+      };
 }
 function next() {
   if (state.phase !== 'next' || !state.onNext) return;
