@@ -190,6 +190,20 @@ min-height: 44px;
 .key.hidden { display: none; }
 #mineBtn, #ansBtn { font-size: 13px; min-height: 38px; }
 .lineIcon { display: block; font-size: 11px; letter-spacing: -1px; }
+.key .eq { display: block; font-size: 10px; font-weight: normal; letter-spacing: 1px; opacity: 0.85; }
+.key.pulse { animation: pulse 0.9s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 3px #ffff00; border-color: #ffff00; } }
+#skipTut {
+position: absolute; top: 4px; right: 6px;
+background: #000; color: #aaa; border: 1px solid #666;
+font-family: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer;
+}
+#skipTut.hidden { display: none; }
+.overlay .how-btn {
+background: #000; border: 2px solid #888; color: #ccc;
+padding: 8px 18px; font-size: 13px; letter-spacing: 2px; cursor: pointer;
+margin-top: 18px; font-family: inherit;
+}
 
 /* — オーバーレイ画面（タイトル・エンディング等） — */
 .overlay {
@@ -309,7 +323,8 @@ white-space: nowrap;
     <p class="sub">～数学Ⅱの章～</p>
     <p style="margin-top:24px;">ぬる ところを みきわめ<br>モンスターを うちたおせ！</p>
     <button class="start-btn" id="startBtn">▶ はじめる</button>
-    <p class="sub" style="margin-top:24px;font-size:10px;">
+    <button class="how-btn" id="howBtn">？ あそびかた</button>
+    <p class="sub" style="margin-top:20px;font-size:10px;">
       LV1〜LV5（各2戦）→ BOSS（4戦）
     </p>
   </div>
@@ -344,6 +359,7 @@ white-space: nowrap;
 
   <!-- 敵と問題 -->
   <div class="rpg-window" id="battle">
+    <button id="skipTut" class="hidden">とばす ▶▶</button>
     <div id="enemy"><div id="monster">👻</div><div id="monsterName">ハミダシ</div></div>
     <div id="problem">
       <div class="label" id="problemLabel">▼ ぬる ところを えらべ</div>
@@ -360,8 +376,8 @@ white-space: nowrap;
   <!-- ボタン -->
   <div id="controls">
     <div class="btns" id="fwdBtns">
-      <button class="key" id="solidBtn"><span class="lineIcon">━━━━</span>じっせん</button>
-      <button class="key" id="dashBtn"><span class="lineIcon">━ ━ ━</span>てんせん</button>
+      <button class="key" id="solidBtn"><span class="lineIcon">━━━━</span>じっせん<span class="eq">＝ あり</span></button>
+      <button class="key" id="dashBtn"><span class="lineIcon">━ ━ ━</span>てんせん<span class="eq">＝ なし</span></button>
       <button class="key submit" id="decideBtn">けってい</button>
     </div>
     <div class="btns hidden" id="revBtns">
@@ -638,7 +654,7 @@ function reasonLines(lv, sem) {
     L.push(sem.s > 0 ? 'かけて プラス ＝ おなじ ふごう どうし（＋＋ と −−）' : 'かけて マイナス ＝ ちがう ふごう どうし（＋− と −＋）');
     L.push('ふだは 1つめ・2つめの かっこの ふごう');
   }
-  L.push('≦ ≧ は じっせん（ふくむ）、＜ ＞ は てんせん（ふくまない）');
+  L.push('≦ ≧ は イコール あり → じっせん、＜ ＞ は イコール なし → てんせん');
   L.push(checkLine(sem));
   return L;
 }
@@ -853,6 +869,7 @@ const state = {
   reveal: false,       // 正しい図を出しているか
   labels: false,       // 区画に ＋− の札を出すか（LV5 の理由）
   view: 'ans',         // ミスのあと平面に出す図：'ans' ただしい ず | 'mine' じぶんの こたえ
+  tut: null,           // チュートリアル中なら { i: 何問目, step: 'tap' | 'line' | 'decide' }
   ctx: C.newContext(),
   onNext: null,
 };
@@ -872,6 +889,10 @@ function renderStatus() {
   const done = Math.min(total, state.levelIdx * C.BATTLES + Math.min(state.slotIdx, C.BATTLES));
   $('bossDisplay').textContent = lv.boss ? 'さいごの たたかい！'
     : '■'.repeat(done) + '□'.repeat(total - done) + '　あと ' + (total - done) + 'たい';
+  if (state.tut) {
+    $('levelDisplay').textContent = 'れんしゅう';
+    $('progressDisplay').textContent = (state.tut.i + 1) + '/' + TUT.length;
+  }
 }
 function renderEnemy() {
   const lv = level();
@@ -901,8 +922,8 @@ function renderControls() {
   $('revBtns').classList.toggle('hidden', !rev);
   $('revDecideBtn').classList.toggle('hidden', showNext);
   // 順方向のミスのあとは「じぶんの こたえ／ただしい ず」を切りかえられる
-  $('mineBtn').classList.toggle('hidden', rev);
-  $('ansBtn').classList.toggle('hidden', rev);
+  $('mineBtn').classList.toggle('hidden', rev || !!state.tut);
+  $('ansBtn').classList.toggle('hidden', rev || !!state.tut);
   $('mineBtn').classList.toggle('on', state.view === 'mine');
   $('ansBtn').classList.toggle('on', state.view === 'ans');
   if (!p) return;
@@ -1061,6 +1082,7 @@ canvas.addEventListener('click', e => {
   const x = -C.R + (e.clientX - rect.left) / rect.width * 2 * C.R;
   const y = C.R - (e.clientY - rect.top) / rect.height * 2 * C.R;
   const key = C.keyAt(p.bounds, x, y);
+  if (state.tut) { tutTap(key); return; }
   if (state.selected.has(key)) state.selected.delete(key); else state.selected.add(key);
   drawPlane();
 });
@@ -1132,6 +1154,7 @@ function startLevel(idx) {
 function submit() {
   const p = state.problem;
   if (state.phase !== 'play' || !p) return;
+  if (state.tut) { tutDecide(); return; }
   let ok, ans;
   if (p.kind === 'fwd') {
     if (state.selected.size === 0) { setMessage('ぬる ところを タップしてね'); return; }
@@ -1224,9 +1247,88 @@ function next() {
   cb();
 }
 
+// ---------- チュートリアル ----------
+// 本物の画面で、塗る → 線をえらぶ → けってい を1問ずつ練習する。ハートは減らない。
+const TUT = [
+  { sem: () => C.and([C.atom.y(1, 1, 1)], false), side: 'うえ', other: 'した', op: '≧', eq: 'あり',
+    line: 'solid', lineName: 'じっせん', why: '線の うえの 点も ふくむ' },
+  { sem: () => C.and([C.atom.y(-1, 2, -1)], true), side: 'した', other: 'うえ', op: '＜', eq: 'なし',
+    line: 'dashed', lineName: 'てんせん', why: '線の うえの 点は ふくまない' },
+];
+function tutDone() { try { return localStorage.getItem('ryouiki-tut') === '1'; } catch (e) { return false; } }
+function pulse(id) { ['solidBtn', 'dashBtn', 'decideBtn'].forEach(b => $(b).classList.toggle('pulse', b === id)); }
+function startTutorial() {
+  state.tut = { i: 0, step: 'tap' };
+  state.levelIdx = 0; state.slotIdx = 0; state.hp = 1; state.lives = MAX_LIVES;
+  monsterEl.textContent = '🎯';
+  monsterEl.className = '';
+  $('monsterName').textContent = 'まと';
+  $('skipTut').classList.remove('hidden');
+  tutProblem();
+}
+function tutProblem() {
+  const t = TUT[state.tut.i];
+  state.problem = C.build(1, t.sem(), 'fwd', rng);
+  state.selected = new Set();
+  state.line = null; state.opt = -1; state.reveal = false; state.labels = false; state.view = 'ans';
+  state.phase = 'play';
+  state.tut.step = 'tap';
+  renderProblem(); renderControls(); renderStatus(); drawPlane(); pulse(null);
+  setMessage('【れんしゅう ' + (state.tut.i + 1) + '/' + TUT.length + '】「' + state.problem.display + '」は 線より ' + t.side + '。\n' +
+             t.side + 'の ところを タップして ぬろう');
+}
+function tutTap(key) {
+  const t = TUT[state.tut.i];
+  if (state.tut.step !== 'tap') return;
+  if (!state.problem.answerKeys.includes(key)) { setMessage('そこは 線より ' + t.other + '。\n' + t.side + 'の ところを タップしてね'); return; }
+  state.selected = new Set([key]);
+  state.tut.step = 'line';
+  drawPlane();
+  setMessage(t.op + ' は イコール ' + t.eq + '。\n' + t.why + ' → 「' + t.lineName + '」を おそう');
+  pulse(t.line === 'solid' ? 'solidBtn' : 'dashBtn');
+}
+function tutLine(choice) {
+  const t = TUT[state.tut.i];
+  if (state.tut.step === 'tap') { setMessage('さきに ' + t.side + 'の ところを タップしてね'); return; }
+  if (choice !== t.line) { setMessage(t.op + ' は イコール ' + t.eq + ' だから「' + t.lineName + '」だよ'); return; }
+  state.line = choice;
+  state.tut.step = 'decide';
+  renderControls();
+  setMessage('さいごに「けってい」を おそう');
+  pulse('decideBtn');
+}
+function tutDecide() {
+  if (state.tut.step !== 'decide') return;
+  const last = state.tut.i === TUT.length - 1;
+  pulse(null);
+  state.reveal = true;
+  state.phase = 'next';
+  renderControls(); drawPlane(); flashScreen(); monsterAnim('hit');
+  setMessage('せいかい！　きいろが ただしい ず。\n' + (last
+    ? 'ずを みて しきを えらぶ もんだいも あるよ。\nじゅんび OK！　ぼうけんへ でかけよう！'
+    : 'つぎは イコール なし の れんしゅう'));
+  state.onNext = last ? endTutorial : () => { state.tut.i += 1; tutProblem(); };
+}
+function endTutorial() {
+  state.tut = null;
+  pulse(null);
+  $('skipTut').classList.add('hidden');
+  try { localStorage.setItem('ryouiki-tut', '1'); } catch (e) { /* 保存できなくても遊べる */ }
+  state.ctx = C.newContext();
+  startLevel(0);
+}
+
 // ---------- 操作 ----------
-$('solidBtn').addEventListener('click', () => { if (state.phase === 'play') { state.line = 'solid'; renderControls(); } });
-$('dashBtn').addEventListener('click', () => { if (state.phase === 'play') { state.line = 'dashed'; renderControls(); } });
+$('solidBtn').addEventListener('click', () => {
+  if (state.phase !== 'play') return;
+  if (state.tut) { tutLine('solid'); return; }
+  state.line = 'solid'; renderControls();
+});
+$('dashBtn').addEventListener('click', () => {
+  if (state.phase !== 'play') return;
+  if (state.tut) { tutLine('dashed'); return; }
+  state.line = 'dashed'; renderControls();
+});
 $('decideBtn').addEventListener('click', submit);
 $('revDecideBtn').addEventListener('click', submit);
 optBtns.forEach((b, i) => b.addEventListener('click', () => {
@@ -1236,7 +1338,13 @@ $('nextBtn').addEventListener('click', next);
 $('mineBtn').addEventListener('click', () => { if (state.phase === 'next') { state.view = 'mine'; renderControls(); drawPlane(); } });
 $('ansBtn').addEventListener('click', () => { if (state.phase === 'next') { state.view = 'ans'; renderControls(); drawPlane(); } });
 
-$('startBtn').addEventListener('click', () => { $('titleScreen').classList.add('hidden'); state.ctx = C.newContext(); startLevel(0); });
+$('startBtn').addEventListener('click', () => {
+  $('titleScreen').classList.add('hidden');
+  state.ctx = C.newContext();
+  if (tutDone()) startLevel(0); else startTutorial();   // はじめての人は れんしゅう から
+});
+$('howBtn').addEventListener('click', () => { $('titleScreen').classList.add('hidden'); startTutorial(); });
+$('skipTut').addEventListener('click', () => { if (state.tut) endTutorial(); });
 $('restartBtn').addEventListener('click', () => { $('endingScreen').classList.add('hidden'); state.ctx = C.newContext(); startLevel(0); });
 $('retryBtn').addEventListener('click', () => { $('gameOverScreen').classList.add('hidden'); startLevel(state.levelIdx); });
 
