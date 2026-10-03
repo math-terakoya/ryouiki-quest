@@ -249,6 +249,11 @@ font-family: inherit;
 }
 .overlay .start-btn:active { background: #fff; color: #000; }
 .overlay .hero { font-size: 64px; margin-bottom: 12px; }
+.overlay .points {
+text-align: left; border: 3px solid #fff; box-shadow: 0 0 0 3px #000, 0 0 0 5px #fff;
+padding: 12px 14px; margin: 4px 0 8px; font-size: 13px; line-height: 2; letter-spacing: 0.5px;
+}
+.overlay .points b { color: #ffff00; font-weight: bold; }
 
 /* — ダメージエフェクト — */
 .dmg-float {
@@ -327,6 +332,20 @@ white-space: nowrap;
     <p class="sub" style="margin-top:20px;font-size:10px;">
       LV1〜LV5（各2戦）→ BOSS（4戦）
     </p>
+  </div>
+
+  <!-- れんしゅう クリア画面 -->
+  <div class="overlay hidden" id="tutDoneScreen">
+    <div class="hero">🎯</div>
+    <h1>れんしゅう<br>クリア！</h1>
+    <div class="points">
+      <div>・y ＞ … は 線より <b>うえ</b></div>
+      <div>・y ＜ … は 線より <b>した</b></div>
+      <div>・≦ ≧ は イコール あり → <b>じっせん</b></div>
+      <div>・＜ ＞ は イコール なし → <b>てんせん</b></div>
+      <div>・ずから しきを えらぶ もんだいも ある</div>
+    </div>
+    <button class="start-btn" id="goBtn">▶ ぼうけんへ</button>
   </div>
 
   <!-- エンディング画面 -->
@@ -1304,10 +1323,10 @@ function tutDecide() {
   state.reveal = true;
   state.phase = 'next';
   renderControls(); drawPlane(); flashScreen(); monsterAnim('hit');
-  setMessage('せいかい！　きいろが ただしい ず。\n' + (last
-    ? 'ずを みて しきを えらぶ もんだいも あるよ。\nじゅんび OK！　ぼうけんへ でかけよう！'
-    : 'つぎは イコール なし の れんしゅう'));
-  state.onNext = last ? endTutorial : () => { state.tut.i += 1; tutProblem(); };
+  setMessage('せいかい！　きいろが ただしい ず。\n' + (last ? 'これで れんしゅうは おしまい' : 'つぎは イコール なし の れんしゅう'));
+  state.onNext = last
+    ? () => { state.phase = 'idle'; $('tutDoneScreen').classList.remove('hidden'); }   // 区切りの画面 → ▶ ぼうけんへ
+    : () => { state.tut.i += 1; tutProblem(); };
 }
 function endTutorial() {
   state.tut = null;
@@ -1345,6 +1364,7 @@ $('startBtn').addEventListener('click', () => {
 });
 $('howBtn').addEventListener('click', () => { $('titleScreen').classList.add('hidden'); startTutorial(); });
 $('skipTut').addEventListener('click', () => { if (state.tut) endTutorial(); });
+$('goBtn').addEventListener('click', () => { $('tutDoneScreen').classList.add('hidden'); endTutorial(); });
 $('restartBtn').addEventListener('click', () => { $('endingScreen').classList.add('hidden'); state.ctx = C.newContext(); startLevel(0); });
 $('retryBtn').addEventListener('click', () => { $('gameOverScreen').classList.add('hidden'); startLevel(state.levelIdx); });
 
@@ -1352,8 +1372,9 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   e.preventDefault();
   if (e.repeat) return;   // 押しっぱなしで何度も受け付けない
-  for (const id of ['titleScreen', 'endingScreen', 'gameOverScreen']) {
-    if (!$(id).classList.contains('hidden')) { $({ titleScreen: 'startBtn', endingScreen: 'restartBtn', gameOverScreen: 'retryBtn' }[id]).click(); return; }
+  const overlayBtn = { titleScreen: 'startBtn', tutDoneScreen: 'goBtn', endingScreen: 'restartBtn', gameOverScreen: 'retryBtn' };
+  for (const id in overlayBtn) {
+    if (!$(id).classList.contains('hidden')) { $(overlayBtn[id]).click(); return; }
   }
   if (state.phase === 'next') next();
   else if (state.phase === 'play' && e.key === 'Enter') submit();
