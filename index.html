@@ -192,7 +192,30 @@ min-height: 44px;
 .lineIcon { display: block; font-size: 11px; letter-spacing: -1px; }
 .key .eq { display: block; font-size: 10px; font-weight: normal; letter-spacing: 1px; opacity: 0.85; }
 .key.pulse { animation: pulse 0.9s ease-in-out infinite; }
-@keyframes pulse { 50% { box-shadow: 0 0 0 3px #ffff00; border-color: #ffff00; } }
+@keyframes pulse { 50% { background: #ffff00; color: #000; border-color: #ffff00; box-shadow: 0 0 0 3px #ffff00; } }
+/* チュートリアル：ここを タップ */
+#tapHint {
+position: absolute; z-index: 5; pointer-events: none;
+transform: translate(-50%, -50%); text-align: center;
+}
+#tapHint.hidden { display: none; }
+#tapHint .ring {
+position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+border: 3px solid #ffff00; border-radius: 50%; animation: ring 1s ease-out infinite;
+}
+@keyframes ring { 0% { transform: scale(0.4); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+#tapHint .finger { display: block; font-size: 34px; animation: tap 0.8s ease-in-out infinite; }
+@keyframes tap { 50% { transform: translateY(6px); } }
+#btnHint {
+position: absolute; z-index: 60; pointer-events: none; font-size: 30px;
+transform: translate(-50%, -100%); animation: tapDown 0.8s ease-in-out infinite;
+}
+#btnHint.hidden { display: none; }
+@keyframes tapDown { 50% { margin-top: 6px; } }
+#tapHint .txt {
+display: inline-block; margin-top: 2px; padding: 1px 6px; background: #000; border: 2px solid #ffff00;
+color: #ffff00; font-size: 12px; font-weight: bold; white-space: nowrap;
+}
 #skipTut {
 position: absolute; top: 4px; right: 6px;
 background: #000; color: #aaa; border: 1px solid #666;
@@ -387,7 +410,9 @@ white-space: nowrap;
   </div>
 
   <!-- 座標平面 -->
-  <div id="planeWrap"><canvas id="plane" width="300" height="300"></canvas></div>
+  <div id="planeWrap"><canvas id="plane" width="300" height="300"></canvas>
+    <div id="tapHint" class="hidden"><div class="ring"></div><span class="finger">👆</span><span class="txt">ここを タップ</span></div>
+  </div>
 
   <!-- メッセージ -->
   <div class="rpg-window" id="message"><span id="msgText">&nbsp;</span></div>
@@ -413,6 +438,7 @@ white-space: nowrap;
     </div>
   </div>
 
+  <div id="btnHint" class="hidden">👇</div>
   <div id="flash"></div>
 </div>
 
@@ -968,6 +994,7 @@ function setMessage(text) {
 const COL_BG = [0, 10, 24];
 const COL_SEL = [30, 90, 210];   // プレイヤーが選んだ区画
 const COL_ANS = [150, 118, 0];   // 正しい図
+const COL_HINT = [92, 84, 20];   // チュートリアルで塗る場所を点滅させる色
 
 function resizePlane() {
   const size = Math.floor(Math.min(wrap.clientWidth - 12, wrap.clientHeight - 8));
@@ -978,6 +1005,8 @@ function resizePlane() {
   canvas.width = Math.round(S * dpr);
   canvas.height = Math.round(S * dpr);
   drawPlane();
+  placeTapHint();
+  placeBtnHint();
 }
 
 function drawPlane() {
@@ -995,7 +1024,9 @@ function drawPlane() {
   const d = img.data;
   let mask = null, col = COL_SEL;
   const mine = !!p && p.kind === 'fwd' && state.phase === 'next' && state.view === 'mine';
-  if (p) {
+  const hinting = !!state.tut && state.tut.step === 'tap' && state.blinkOn;
+  if (p && hinting) { mask = C.keyMask(p.bounds, new Set(p.answerKeys)); col = COL_HINT; }
+  else if (p) {
     const showAns = (state.reveal || p.kind === 'rev') && !mine;
     const fill = showAns ? new Set(p.answerKeys) : state.selected;
     col = showAns ? COL_ANS : COL_SEL;
@@ -1274,8 +1305,45 @@ const TUT = [
   { sem: () => C.and([C.atom.y(-1, 2, -1)], true), side: 'した', other: 'うえ', op: '＜', eq: 'なし',
     line: 'dashed', lineName: 'てんせん', why: '線の うえの 点は ふくまない' },
 ];
+let blinkTimer = null;
+function startHint() {
+  stopHint();
+  state.blinkOn = true;
+  blinkTimer = setInterval(() => { state.blinkOn = !state.blinkOn; drawPlane(); }, 450);
+  $('tapHint').classList.remove('hidden');
+  placeTapHint();
+}
+function stopHint() {
+  if (blinkTimer) clearInterval(blinkTimer);
+  blinkTimer = null;
+  state.blinkOn = false;
+  $('tapHint').classList.add('hidden');
+}
+// 指のマークを、塗る区画の真ん中に置く
+function placeTapHint() {
+  const p = state.problem;
+  if (!state.tut || state.tut.step !== 'tap' || !p) return;
+  const c = C.centroids(p.bounds)[p.answerKeys[0]];
+  const cr = canvas.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+  $('tapHint').style.left = (cr.left - wr.left + (c.x + C.R) / (2 * C.R) * cr.width) + 'px';
+  $('tapHint').style.top = (cr.top - wr.top + (C.R - c.y) / (2 * C.R) * cr.height) + 'px';
+}
 function tutDone() { try { return localStorage.getItem('ryouiki-tut') === '1'; } catch (e) { return false; } }
-function pulse(id) { ['solidBtn', 'dashBtn', 'decideBtn'].forEach(b => $(b).classList.toggle('pulse', b === id)); }
+// ボタンを点滅させ、その上に 👇 を出す（id が null なら消す）
+let pulseId = null;
+function pulse(id) {
+  pulseId = id;
+  ['solidBtn', 'dashBtn', 'decideBtn'].forEach(b => $(b).classList.toggle('pulse', b === id));
+  $('btnHint').classList.toggle('hidden', !id);
+  placeBtnHint();
+}
+function placeBtnHint() {
+  if (!pulseId) return;
+  const b = $(pulseId).getBoundingClientRect(), g = gameEl.getBoundingClientRect();
+  // ボタンの右寄りに置く（ボタンの字やメッセージ欄の字を隠さない）
+  $('btnHint').style.left = (b.left - g.left + b.width * 0.84) + 'px';
+  $('btnHint').style.top = (b.top - g.top + 26) + 'px';
+}
 function startTutorial() {
   state.tut = { i: 0, step: 'tap' };
   state.levelIdx = 0; state.slotIdx = 0; state.hp = 1; state.lives = MAX_LIVES;
@@ -1292,7 +1360,9 @@ function tutProblem() {
   state.line = null; state.opt = -1; state.reveal = false; state.labels = false; state.view = 'ans';
   state.phase = 'play';
   state.tut.step = 'tap';
-  renderProblem(); renderControls(); renderStatus(); drawPlane(); pulse(null);
+  renderProblem(); renderControls(); renderStatus(); pulse(null);
+  startHint();
+  drawPlane();
   setMessage('【れんしゅう ' + (state.tut.i + 1) + '/' + TUT.length + '】「' + state.problem.display + '」は 線より ' + t.side + '。\n' +
              t.side + 'の ところを タップして ぬろう');
 }
@@ -1302,6 +1372,7 @@ function tutTap(key) {
   if (!state.problem.answerKeys.includes(key)) { setMessage('そこは 線より ' + t.other + '。\n' + t.side + 'の ところを タップしてね'); return; }
   state.selected = new Set([key]);
   state.tut.step = 'line';
+  stopHint();
   drawPlane();
   setMessage(t.op + ' は イコール ' + t.eq + '。\n' + t.why + ' → 「' + t.lineName + '」を おそう');
   pulse(t.line === 'solid' ? 'solidBtn' : 'dashBtn');
@@ -1329,6 +1400,7 @@ function tutDecide() {
     : () => { state.tut.i += 1; tutProblem(); };
 }
 function endTutorial() {
+  stopHint();
   state.tut = null;
   pulse(null);
   $('skipTut').classList.add('hidden');
