@@ -952,10 +952,11 @@ function renderProblem() {
     $('problemExpr').textContent = '？';
   } else {
     $('problemLabel').textContent = '▼ ぬる ところを えらべ';
-    $('problemExpr').textContent = twoLines(p.display);
+    $('problemExpr').textContent = twoLines(PUNC(p.display));
   }
 }
 // 連立は「かつ」の前で改行する（「か／つ」で切れないように）
+const PUNC = t => t.replace(/。/g, '．').replace(/、/g, '，');   // 問題文は 教科書と おなじ「，」「．」（「。」が 度の「°」に 見えないように）
 function twoLines(text) { return text.replace(' かつ ', '\nかつ '); }
 function renderControls() {
   const p = state.problem;
