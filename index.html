@@ -158,7 +158,8 @@ padding: 6px 10px;
 .btns { display: grid; gap: 5px; }
 .btns.hidden { display: none; }
 #fwdBtns { grid-template-columns: 1fr 1fr 1fr; }
-#revBtns { grid-template-columns: 1fr 1fr; }
+#revBtns { grid-template-columns: repeat(2, minmax(0, 1fr)); }   /* 長い 式に 押し広げられない */
+#revBtns .opt { min-width: 0; overflow: hidden; }
 .key {
 background: #000;
 border: 2px solid #fff;
@@ -982,11 +983,11 @@ function renderProblem() {
 const PUNC = t => t.replace(/。/g, '．').replace(/、/g, '，');   // 問題文は 教科書と おなじ「，」「．」（「。」が 度の「°」に 見えないように）
 function twoLines(text) { return text.replace(' かつ ', '\nかつ '); }
 // 式は 途中で 改行しない（文字が 大きい 設定でも）
-function keepMath(root) {
+function keepMath(root, noFit) {
   // 問題文は「演算子の となりで ない 空白」と 改行の ところ だけで 折る。式の かたまり（y ＝ (2 ＋ √3)x、tan(β − α) ＝ ？ など）は
   // √ や 分数を ふくめて 1つの 改行しない 箱（.nwm）に 入れる。1行に 入らない 長い 式だけ、＝・不等号の 前で 分けて よい
   if (!root) return;
-  if (root.querySelector('.nwm')) { fitRuns(root); return; }
+  if (root.querySelector('.nwm')) { if (!noFit) fitRuns(root); return; }
   const OPS = '＝＋−×＜＞≦≧±', out = [];
   let run = null, prev = '';
   const newRun = () => { const s = document.createElement('span'); s.className = 'nwm'; s.style.whiteSpace = 'nowrap'; return s; };
@@ -1007,16 +1008,16 @@ function keepMath(root) {
         buf += ch;
       }
       if (buf) { add(document.createTextNode(buf)); prev = buf[buf.length - 1]; }
-    } else if (k.nodeName === 'BR') { flush(); out.push(k); prev = ''; }
+    } else if (k.nodeName === 'BR' || k.nodeName === 'TABLE' || k.nodeName === 'DIV') { flush(); out.push(k); prev = ''; }   // 表などは そのまま
     else { add(k); prev = 'x'; }
   });
   flush();
   root.replaceChildren(...out);
-  fitRuns(root);
+  if (!noFit) fitRuns(root);
 }
 function fitRuns(root) {   // 図の 幅が 決まって から 測る（まだ 見えない ときは 何も しない）
   const newRun = () => { const s = document.createElement('span'); s.className = 'nwm'; s.style.whiteSpace = 'nowrap'; return s; };
-  const W = root.clientWidth;
+  const cs = getComputedStyle(root), W = root.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);   // 中身の 幅
   if (W < 40) return;
   root.querySelectorAll('.nwm[data-wrap]').forEach(sp => { sp.style.whiteSpace = 'nowrap'; sp.removeAttribute('data-wrap'); });   // 前に 折った ものは 測り直す
   let split = false;
@@ -1069,7 +1070,16 @@ function renderControls() {
       b.classList.toggle('wrong', state.reveal && state.opt === i && !p.options[i].correct);
     });
     $('revDecideBtn').disabled = state.opt < 0;
+    fitRevOpts();
   }
+}
+function fitRevOpts() {   // 選択肢の 式も 改行しない 箱に。入らなければ 文字を 小さく（10px まで）、それでも 入らない 長い 式だけ 分ける
+  if ($('revBtns').classList.contains('hidden')) return;
+  optBtns.forEach(b => { b.style.fontSize = ''; b.querySelectorAll('.nwm[data-wrap]').forEach(sp => { sp.style.whiteSpace = 'nowrap'; sp.removeAttribute('data-wrap'); }); keepMath(b, true); });
+  const over = () => optBtns.some(b => b.scrollWidth > b.clientWidth + 1);
+  let f = parseFloat(getComputedStyle(optBtns[0]).fontSize);
+  while (over() && f > 10) { f -= 1; optBtns.forEach(b => { b.style.fontSize = f + 'px'; }); }
+  if (over()) optBtns.forEach(b => fitRuns(b));
 }
 function setMessage(text) {
   $('msgText').textContent = text;
@@ -1083,6 +1093,7 @@ const COL_ANS = [150, 118, 0];   // 正しい図
 const COL_HINT = [92, 84, 20];   // チュートリアルで塗る場所を点滅させる色
 
 function resizePlane() {
+  fitRevOpts();
   const size = Math.floor(Math.min(wrap.clientWidth - 12, wrap.clientHeight - 8));
   const S = Math.max(100, size);
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
