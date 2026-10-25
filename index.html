@@ -67,7 +67,7 @@ flex-shrink: 0;
 /* — 敵と問題 — */
 #battle {
 display: grid;
-grid-template-columns: 64px 1fr;
+grid-template-columns: 64px minmax(0, 1fr);   /* 長い 式に 押し広げられない */
 align-items: center;
 gap: 6px;
 padding: 6px 8px;
@@ -348,8 +348,9 @@ white-space: nowrap;
 .key { min-width: 0; max-width: 100%; overflow: hidden; }
 #game, #status, #message, #battle, #problem, #controls { min-width: 0; max-width: 100%; }
 #status .row { min-width: 0; gap: 4px; }
-#status .row .value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
-#message, #problemExpr { overflow-wrap: anywhere; }
+#status .row .value { min-width: 0; word-break: keep-all; overflow-wrap: break-word; text-align: right; }   /* ことばの 途中で 折らない（空白で 折る） */
+#message { overflow-wrap: anywhere; }
+#problemExpr { overflow-wrap: break-word; }
 #status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 #status .label { white-space: nowrap; }
 #status .row:not(.wide) .value { white-space: nowrap; }
@@ -972,12 +973,35 @@ function renderProblem() {
     $('problemExpr').textContent = '？';
   } else {
     $('problemLabel').textContent = '▼ ぬる ところを えらべ';
-    $('problemExpr').textContent = twoLines(PUNC(p.display));
+    const ex = $('problemExpr'); ex.style.fontSize = ''; ex.textContent = twoLines(PUNC(p.display)); keepMath(ex);
+    let fs = parseFloat(getComputedStyle(ex).fontSize);   // それでも 入らない ときは 文字を 小さく（10px まで。ほかの ゲームの 問題文と 同じ）
+    while (ex.scrollWidth > ex.clientWidth + 1 && fs > 10) { fs -= 1; ex.style.fontSize = fs + 'px'; ex.textContent = twoLines(PUNC(p.display)); keepMath(ex); }
   }
 }
 // 連立は「かつ」の前で改行する（「か／つ」で切れないように）
 const PUNC = t => t.replace(/。/g, '．').replace(/、/g, '，');   // 問題文は 教科書と おなじ「，」「．」（「。」が 度の「°」に 見えないように）
 function twoLines(text) { return text.replace(' かつ ', '\nかつ '); }
+// 式は 途中で 改行しない（文字が 大きい 設定でも）
+function keepMath(root) {
+  if (!root) return;
+  const re = /[^\s，．、。]+(?:[  ][＝＋−×＜＞≦≧±][  ][^\s，．、。]+)+/g, nodes = [], made = [];
+  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n;
+  while ((n = tw.nextNode())) if (!(n.parentNode.classList && n.parentNode.classList.contains('nwm'))) nodes.push(n);
+  const box = t => { const sp = document.createElement('span'); sp.className = 'nwm'; sp.style.whiteSpace = 'nowrap'; sp.textContent = t; return sp; };
+  for (const n of nodes) {   // 式の かたまり（a ＝ 7、(2 ＋ √3)x など）を 改行しない 箱に 入れる
+    const t = n.textContent; let m, last = 0; const frag = document.createDocumentFragment(); re.lastIndex = 0;
+    while ((m = re.exec(t))) { frag.appendChild(document.createTextNode(t.slice(last, m.index))); const sp = box(m[0]); made.push(sp); frag.appendChild(sp); last = m.index + m[0].length; }
+    if (last) { frag.appendChild(document.createTextNode(t.slice(last))); n.parentNode.replaceChild(frag, n); }
+  }
+  for (const sp of made) {   // 1行に 入りきらない 長い 式だけ、＝・不等号の 前で 改行して よい ことに する
+    if (sp.offsetWidth <= root.clientWidth) continue;
+    const parts = sp.textContent.split(/[  ](?=[＝＜＞≦≧][  ])/);
+    if (parts.length < 2) continue;
+    const frag = document.createDocumentFragment();
+    parts.forEach((x, i) => { if (i) frag.appendChild(document.createTextNode(' ')); frag.appendChild(box(x)); });
+    sp.parentNode.replaceChild(frag, sp);
+  }
+}
 function renderControls() {
   const p = state.problem;
   const showNext = state.phase === 'next';
