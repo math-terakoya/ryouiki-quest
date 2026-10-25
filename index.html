@@ -340,6 +340,24 @@ white-space: nowrap;
 .key { min-height: 40px; font-size: 14px; }
 .key.opt { min-height: 38px; font-size: 13px; }
 }
+
+/* — 細い 画面・文字が 大きい 設定でも はみ出さない（列は 中身に 押し広げられない・ステータスの 名前は 折らない） — */
+#controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#controls.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#controls.one { grid-template-columns: minmax(0, 1fr); }
+.key { min-width: 0; max-width: 100%; overflow: hidden; }
+#game, #status, #message, #battle, #problem, #controls { min-width: 0; max-width: 100%; }
+#status .row { min-width: 0; gap: 4px; }
+#status .row .value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+#message, #problemExpr { overflow-wrap: anywhere; }
+#status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#status .label { white-space: nowrap; }
+#status .row:not(.wide) .value { white-space: nowrap; }
+@media (max-width: 300px) { #status { column-gap: 6px; padding: 4px 6px; } }
+/* 文字が 大きい 設定で 縦に 入りきらない ときは 画面を 縦に スクロール（図は 100px より 小さく しない） */
+#game { overflow-y: auto; overflow-x: hidden; }
+#planeWrap { min-height: 100px; }
+#message { flex-shrink: 1; min-height: 48px; }   /* 縦が 足りない ときは まず メッセージを 小さく（中で スクロール）して ボタンを 画面に のこす */
 </style>
 </head>
 <body>
